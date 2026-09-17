@@ -2,6 +2,10 @@
 /build/
 /builds/
 /out/
+/build-*/
+/release-*/
+/release-package-*/
+Textractor-Enhanced-*.zip
 *.vs/
 *.vscode/
 *.user
