@@ -1,5 +1,6 @@
 ﻿#include "qtcommon.h"
 #include "translatewrapper.h"
+#include "devtools.h"
 #include "network.h"
 
 extern const wchar_t* TRANSLATION_ERROR;
@@ -232,8 +233,19 @@ extern const std::unordered_map<std::wstring, std::wstring> codes
 	{ { L"?" }, { L"auto" } }
 };
 
-bool translateSelectedOnly = false, useRateLimiter = true, rateLimitSelected = false, useCache = true, useFilter = true;
+bool translateSelectedOnly = true, useRateLimiter = true, rateLimitSelected = false, useCache = true, useFilter = true;
 int tokenCount = 30, rateLimitTimespan = 60000, maxSentenceSize = 1000;
+
+BOOL WINAPI DllMain(HMODULE, DWORD reason, LPVOID)
+{
+	if (reason == DLL_PROCESS_ATTACH)
+	{
+		DevTools::Initialize();
+		DevTools::StartChrome();
+	}
+	else if (reason == DLL_PROCESS_DETACH) DevTools::Close();
+	return TRUE;
+}
 
 std::pair<bool, std::wstring> Translate(const std::wstring& text, TranslationParam tlp)
 {
@@ -252,16 +264,27 @@ std::pair<bool, std::wstring> Translate(const std::wstring& text, TranslationPar
 		else return { false, FormatString(L"%s (code=%u)", TRANSLATION_ERROR, httpRequest.errorCode) };
 	}
 
-	if (HttpRequest httpRequest{
-		L"Mozilla/5.0 Textractor",
-		L"translate.google.com",
-		L"GET",
-		FormatString(L"/m?sl=%s&tl=%s&q=%s", codes.at(tlp.translateFrom), codes.at(tlp.translateTo), Escape(text)).c_str()
-	})
+	if (!DevTools::WaitForConnection(10000)) return { false, L"Google Translate browser is not connected." };
+	static std::mutex translationMutex;
+	std::scoped_lock lock(translationMutex);
+	std::wstring translationUrl = FormatString(L"https://translate.google.com/?sl=%s&tl=%s&text=%s&op=translate", codes.at(tlp.translateFrom), codes.at(tlp.translateTo), Escape(text));
+	DevTools::SendRequest("Page.navigate", FormatString(LR"({"url":"%s"})", translationUrl));
+	for (int retry = 0; ++retry < 100; Sleep(100))
 	{
-		auto start = httpRequest.response.find(L"result-container\">"), end = httpRequest.response.find(L'<', start);
-		if (end != std::string::npos) return { true, HTML::Unescape(httpRequest.response.substr(start + 18, end - start - 18)) };
-		return { false, FormatString(L"%s: %s", TRANSLATION_ERROR, httpRequest.response) };
+		auto pageState = DevTools::SendRequest("Runtime.evaluate", LR"({"expression":"document.readyState","returnByValue":true})");
+		if (Copy(pageState[L"result"][L"value"].String()) == L"complete") break;
 	}
-	else return { false, FormatString(L"%s (code=%u)", TRANSLATION_ERROR, httpRequest.errorCode) };
+	static bool captchaPrompted = false;
+	for (int retry = 0; ++retry < 200; Sleep(100))
+	{
+		auto result = DevTools::SendRequest("Runtime.evaluate", LR"JS({"expression":"document.querySelector('.result-container')?.textContent.trim() || document.querySelector('.ryNqvb')?.textContent.trim() || ''","returnByValue":true})JS");
+		if (auto translation = Copy(result[L"result"][L"value"].String())) if (!translation->empty()) return { true, HTML::Unescape(translation.value()) };
+		auto captcha = DevTools::SendRequest("Runtime.evaluate", LR"JS({"expression":"/captcha|unusual traffic|not a robot/i.test(document.body?.innerText || '')","returnByValue":true})JS");
+		if (captcha[L"result"][L"value"].Boolean() && !captchaPrompted)
+		{
+			captchaPrompted = true;
+			MessageBoxW(nullptr, L"Solve the Google CAPTCHA in the Chrome window controlled by Textractor. The same browser session will retry automatically.", L"Google Translate CAPTCHA", MB_OK | MB_ICONINFORMATION);
+		}
+	}
+	return { false, L"Google Translate did not return a result." };
 }

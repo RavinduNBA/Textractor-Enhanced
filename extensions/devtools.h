@@ -4,6 +4,8 @@
 namespace DevTools
 {
 	void Initialize();
+	void StartChrome();
+	bool WaitForConnection(int timeoutMilliseconds);
 	void Close();
 	bool Connected();
 	JSON::Value<wchar_t> SendRequest(const char* method, const std::wstring& params = L"{}");

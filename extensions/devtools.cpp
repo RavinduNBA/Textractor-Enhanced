@@ -6,6 +6,8 @@
 #include <QMetaEnum>
 #include <QFileDialog>
 #include <QMouseEvent>
+#include <QTimer>
+#include <TlHelp32.h>
 
 extern const char* CHROME_LOCATION;
 extern const char* START_DEVTOOLS;
@@ -23,9 +25,21 @@ namespace
 {
 	QLabel* statusLabel;
 	AutoHandle<> process = NULL;
+	AutoHandle<> browserJob = NULL;
 	QWebSocket webSocket;
 	std::atomic<int> idCounter = 0;
 	Synchronized<std::unordered_map<int, concurrency::task_completion_event<JSON::Value<wchar_t>>>> mapQueue;
+
+	void TerminateProcessTree(DWORD processId)
+	{
+		AutoHandle<> snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+		if (!snapshot) return;
+		PROCESSENTRY32W entry = { sizeof(entry) };
+		if (Process32FirstW(snapshot, &entry)) do
+			if (entry.th32ParentProcessID == processId) TerminateProcessTree(entry.th32ProcessID);
+		while (Process32NextW(snapshot, &entry));
+		if (AutoHandle<> child = OpenProcess(PROCESS_TERMINATE, FALSE, processId)) TerminateProcess(child, 0);
+	}
 
 	void StatusChanged(QString status)
 	{
@@ -36,7 +50,7 @@ namespace
 		if (process) DevTools::Close();
 
 		auto args = FormatString(
-			L"%s --proxy-server=direct:// --disable-extensions --disable-gpu --no-first-run --user-data-dir=\"%s\\devtoolscache\" --remote-debugging-port=9222",
+			L"\"%s\" --proxy-server=direct:// --disable-extensions --disable-gpu --no-first-run --user-data-dir=\"%s\\devtoolscache\" --remote-debugging-port=9222",
 			chromePath,
 			std::filesystem::current_path().wstring()
 		);
@@ -47,23 +61,36 @@ namespace
 		if (!CreateProcessW(NULL, args.data(), nullptr, nullptr, FALSE, 0, nullptr, nullptr, &DUMMY, &processInfo)) return StatusChanged("StartupFailed");
 		CloseHandle(processInfo.hThread);
 		process = processInfo.hProcess;
+		browserJob = CreateJobObjectW(nullptr, nullptr);
+		if (browserJob)
+		{
+			JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits = {};
+			limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+			SetInformationJobObject(browserJob, JobObjectExtendedLimitInformation, &limits, sizeof(limits));
+			AssignProcessToJobObject(browserJob, process);
+		}
 
-		if (HttpRequest httpRequest{
-			L"Mozilla/5.0 Textractor",
-			L"127.0.0.1",
-			L"POST",
-			L"/json/list",
-			"",
-			NULL,
-			9222,
-			NULL,
-			WINHTTP_FLAG_ESCAPE_DISABLE
-		})
-			if (auto list = Copy(JSON::Parse(httpRequest.response).Array())) if (auto it = std::find_if(
-				list->begin(),
-				list->end(),
-				[](const JSON::Value<wchar_t>& object) { return object[L"type"].String() && *object[L"type"].String() == L"page" && object[L"webSocketDebuggerUrl"].String(); }
-			); it != list->end()) return webSocket.open(S(*(*it)[L"webSocketDebuggerUrl"].String()));
+		for (int retry = 0; ++retry < 100; Sleep(100))
+			if (HttpRequest httpRequest{
+				L"Mozilla/5.0 Textractor",
+				L"127.0.0.1",
+				L"GET",
+				L"/json/list",
+				"",
+				NULL,
+				9222,
+				NULL,
+				WINHTTP_FLAG_ESCAPE_DISABLE
+			})
+				if (auto list = Copy(JSON::Parse(httpRequest.response).Array())) if (auto it = std::find_if(
+					list->begin(),
+					list->end(),
+					[](const JSON::Value<wchar_t>& object) { return object[L"type"].String() && *object[L"type"].String() == L"page" && object[L"webSocketDebuggerUrl"].String(); }
+				); it != list->end())
+				{
+					webSocket.open(S(*(*it)[L"webSocketDebuggerUrl"].String()));
+					return;
+				}
 
 		StatusChanged("ConnectingFailed");
 	}
@@ -87,6 +114,44 @@ namespace
 
 namespace DevTools
 {
+	bool Connected();
+
+	void StartChromeNow()
+	{
+		QString chromePath = settings.value(CHROME_LOCATION).toString();
+		if (chromePath.isEmpty())
+		{
+			wchar_t folderPath[MAX_PATH + 1] = {};
+			for (auto folder : { CSIDL_PROGRAM_FILESX86, CSIDL_PROGRAM_FILES, CSIDL_LOCAL_APPDATA })
+			{
+				SHGetFolderPathW(NULL, folder, NULL, SHGFP_TYPE_CURRENT, folderPath);
+				for (auto suffix : { L"/Google/Chrome/Application/chrome.exe", L"/Microsoft/Edge/Application/msedge.exe" })
+				{
+					std::wstring executablePath = std::wstring(folderPath) + suffix;
+					if (std::filesystem::exists(executablePath))
+					{
+						chromePath = S(executablePath);
+						break;
+					}
+				}
+				if (!chromePath.isEmpty()) break;
+			}
+		}
+		if (!chromePath.isEmpty()) Start(S(chromePath), settings.value(HIDE_CHROME, true).toBool());
+	}
+
+	void StartChrome()
+	{
+		if (auto application = QCoreApplication::instance())
+			QMetaObject::invokeMethod(application, [] { StartChromeNow(); }, Qt::QueuedConnection);
+	}
+
+	bool WaitForConnection(int timeoutMilliseconds)
+	{
+		for (int elapsed = 0; elapsed < timeoutMilliseconds && !Connected(); elapsed += 50) Sleep(50);
+		return Connected();
+	}
+
 	void Initialize()
 	{		
 		QString chromePath = settings.value(CHROME_LOCATION).toString();
@@ -120,7 +185,11 @@ namespace DevTools
 		auto headlessCheck = new QCheckBox();
 		auto startButton = new QPushButton(START_DEVTOOLS), stopButton = new QPushButton(STOP_DEVTOOLS);
 		headlessCheck->setChecked(settings.value(HIDE_CHROME, true).toBool());
-		QObject::connect(headlessCheck, &QCheckBox::clicked, [](bool headless) { settings.setValue(HIDE_CHROME, headless); });
+		QObject::connect(headlessCheck, &QCheckBox::clicked, [](bool headless)
+		{
+			settings.setValue(HIDE_CHROME, headless);
+			if (process) StartChrome();
+		});
 		QObject::connect(startButton, &QPushButton::clicked, [chromePathEdit, headlessCheck] { Start(S(chromePathEdit->text()), headlessCheck->isChecked()); });
 		QObject::connect(stopButton, &QPushButton::clicked, &Close);
 		auto buttons = new QHBoxLayout();
@@ -146,13 +215,23 @@ namespace DevTools
 
 		if (process)
 		{
+			DWORD processId = GetProcessId(process);
+			if (browserJob) TerminateJobObject(browserJob, 0);
+			TerminateProcessTree(processId);
 			TerminateProcess(process, 0);
 			WaitForSingleObject(process, 1000);
+			process = NULL;
+			browserJob = NULL;
+			std::error_code cleanupError;
 			for (int retry = 0; ++retry < 20; Sleep(100))
-				try { std::filesystem::remove_all(L"devtoolscache"); break; }
-				catch (std::filesystem::filesystem_error) { continue; }
+			{
+				cleanupError.clear();
+				std::filesystem::remove_all(L"devtoolscache", cleanupError);
+				if (!cleanupError) break;
+			}
 		}
 		process = NULL;
+		browserJob = NULL;
 		StatusChanged("Stopped");
 	}
 
