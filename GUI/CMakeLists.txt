@@ -2,6 +2,7 @@ add_executable(Textractor WIN32
 	main.cpp
 	exception.cpp
 	mainwindow.cpp
+	speakerparser.cpp
 	extenwindow.cpp
 	attachprocessdialog.cpp
 	Textractor.rc

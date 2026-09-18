@@ -41,6 +41,29 @@ The enhanced Google Translate extension uses a browser session controlled throug
 
 The browser can run hidden by default. Use the DevTools settings to toggle **Hide Chrome** and control whether the browser window is visible. The extension defaults to translating the selected thread only.
 
+### Dialogue Thread Roles and Speaker Names
+
+Google Translate can assign different roles to text threads from **Settings** while a thread is selected:
+
+- **Speaker** for a thread that contains only a character name
+- **Dialogue** for a thread that contains only dialogue
+- **Speaker + dialogue** for text such as `未来「のーぞーむーちゃんっ」`
+- **Automatic** to use the normal translation behavior
+
+For speaker threads, add name mappings in the Google Translate extension settings under **Speaker names**, one per line:
+
+```text
+未来=Mirai
+京香=Kyoka
+```
+
+Mapped names are used directly instead of being sent to Google Translate, preventing names such as `未来` from being translated as the common word `future`. Speaker + dialogue threads are split into separate speaker and dialogue queries, then displayed as:
+
+```text
+Mirai:
+Nozomu-chan!
+```
+
 ## Contributing
 
 All contributions are appreciated! Please email me at akashmozumdar@gmail.com if you have any questions about the codebase.<br>

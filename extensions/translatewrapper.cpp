@@ -1,10 +1,12 @@
 ﻿#include "qtcommon.h"
+#include "const.h"
 #include "extension.h"
 #include "translatewrapper.h"
 #include "blockmarkup.h"
 #include <concurrent_priority_queue.h>
 #include <fstream>
 #include <QComboBox>
+#include <QPlainTextEdit>
 
 extern const char* NATIVE_LANGUAGE;
 extern const char* TRANSLATE_TO;
@@ -36,6 +38,43 @@ namespace
 {
 	Synchronized<TranslationParam> tlp;
 	Synchronized<std::unordered_map<std::wstring, std::wstring>> translationCache;
+	Synchronized<std::unordered_map<std::wstring, std::wstring>> speakerNames;
+	constexpr auto SPEAKER_NAMES = "Speaker names";
+
+	void LoadSpeakerNames(QString text)
+	{
+		auto names = speakerNames.Acquire();
+		names->clear();
+		for (auto line : text.split('\n', QString::SkipEmptyParts))
+		{
+			auto separator = line.indexOf('=');
+			if (separator > 0) names->try_emplace(S(line.left(separator).trimmed()), S(line.mid(separator + 1).trimmed()));
+		}
+	}
+
+	std::optional<std::pair<std::wstring, std::wstring>> SplitSpeakerDialogue(const std::wstring& sentence)
+	{
+		auto start = sentence.find_first_not_of(L" \t");
+		if (start == std::wstring::npos) return {};
+		if (auto separator = sentence.find_first_of(L"「『", start); separator != std::wstring::npos)
+		{
+			auto speaker = sentence.substr(start, separator - start);
+			while (!speaker.empty() && (speaker.back() == L' ' || speaker.back() == L'\t')) speaker.pop_back();
+			if (!speaker.empty()) return std::pair{ speaker, sentence.substr(separator) };
+		}
+		if (auto separator = sentence.find_first_of(L":：", start); separator != std::wstring::npos)
+		{
+			auto speaker = sentence.substr(start, separator - start);
+			while (!speaker.empty() && (speaker.back() == L' ' || speaker.back() == L'\t')) speaker.pop_back();
+			if (!speaker.empty() && sentence.substr(separator + 1, 2) != L"//")
+			{
+				auto dialogueStart = separator + 1;
+				while (dialogueStart < sentence.size() && (sentence[dialogueStart] == L' ' || sentence[dialogueStart] == L'\t')) ++dialogueStart;
+				return std::pair{ speaker, sentence.substr(dialogueStart) };
+			}
+		}
+		return {};
+	}
 
 	std::string CacheFile()
 	{
@@ -91,6 +130,16 @@ public:
 		SaveTranslateFrom(translateFromCombo->currentText());
 		display->addRow(TRANSLATE_FROM, translateFromCombo);
 		connect(translateFromCombo, &QComboBox::currentTextChanged, this, &Window::SaveTranslateFrom);
+		auto speakerNamesEdit = new QPlainTextEdit(this);
+		speakerNamesEdit->setPlaceholderText("Japanese name=English name");
+		speakerNamesEdit->setPlainText(settings.value(SPEAKER_NAMES).toString());
+		LoadSpeakerNames(speakerNamesEdit->toPlainText());
+		display->addRow(SPEAKER_NAMES, speakerNamesEdit);
+		connect(speakerNamesEdit, &QPlainTextEdit::textChanged, [speakerNamesEdit]
+		{
+			settings.setValue(SPEAKER_NAMES, speakerNamesEdit->toPlainText());
+			LoadSpeakerNames(speakerNamesEdit->toPlainText());
+		});
 		for (auto [value, label] : Array<bool&, const char*>{
 			{ translateSelectedOnly, TRANSLATE_SELECTED_THREAD_ONLY },
 			{ useRateLimiter, RATE_LIMIT_ALL_THREADS },
@@ -182,16 +231,33 @@ bool ProcessSentence(std::wstring& sentence, SentenceInfo sentenceInfo)
 		sentence.erase(std::remove_if(sentence.begin(), sentence.end(), [](wchar_t ch) { return ch < ' ' && ch != '\n'; }), sentence.end());
 	}
 	if (sentence.empty()) return true;
-	if (sentence.size() > maxSentenceSize) translation = SENTENCE_TOO_LARGE_TO_TRANS;
-	if (useCache)
+	auto translatePart = [&](const std::wstring& part, bool speakerPart = false)
 	{
-		auto translationCache = ::translationCache.Acquire();
-		if (auto it = translationCache->find(sentence); it != translationCache->end()) translation = it->second;
-	}
-	if (translation.empty() && (!translateSelectedOnly || sentenceInfo["current select"]))
-		if (rateLimiter.Request() || !useRateLimiter || (!rateLimitSelected && sentenceInfo["current select"])) std::tie(cache, translation) = Translate(sentence, tlp.Copy());
-		else translation = TOO_MANY_TRANS_REQUESTS;
-	if (cache) translationCache->operator[](sentence) = translation;
+		std::wstring result;
+		if (speakerPart)
+		{
+			auto names = speakerNames.Acquire();
+			if (auto it = names->find(part); it != names->end()) return it->second;
+		}
+		if (useCache)
+		{
+			auto saved = ::translationCache.Acquire();
+			if (auto it = saved->find(part); it != saved->end()) return it->second;
+		}
+		if (part.size() > maxSentenceSize) return std::wstring(SENTENCE_TOO_LARGE_TO_TRANS);
+		if (translateSelectedOnly && !sentenceInfo["current select"]) return result;
+		if (!(rateLimiter.Request() || !useRateLimiter || (!rateLimitSelected && sentenceInfo["current select"]))) return std::wstring(TOO_MANY_TRANS_REQUESTS);
+		auto response = Translate(part, tlp.Copy());
+		if (response.first && useCache) ::translationCache->operator[](part) = response.second;
+		return response.second;
+	};
+	if (sentenceInfo["thread role"] == THREAD_ROLE_SPEAKER)
+		translation = translatePart(sentence, true);
+	else if (sentenceInfo["thread role"] == THREAD_ROLE_SPEAKER_DIALOGUE)
+		if (auto parts = SplitSpeakerDialogue(sentence))
+			translation = translatePart(parts->first, true) + L":\n" + translatePart(parts->second);
+		else translation = translatePart(sentence);
+	else translation = translatePart(sentence);
 
 	if (useFilter) Trim(translation);
 	for (int i = 0; i < translation.size(); ++i) if (translation[i] == '\r' && translation[i + 1] == '\n') translation[i] = 0x200b; // for some reason \r appears as newline - no need to double

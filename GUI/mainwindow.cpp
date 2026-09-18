@@ -6,6 +6,7 @@
 #include "../host/host.h"
 #include "../host/hookcode.h"
 #include "attachprocessdialog.h"
+#include "speakerparser.h"
 #include <shellapi.h>
 #include <process.h>
 #include <QRegularExpression>
@@ -64,6 +65,7 @@ extern const char* DEFAULT_CODEPAGE;
 extern const char* FLUSH_DELAY;
 extern const char* MAX_BUFFER_SIZE;
 extern const char* MAX_HISTORY_SIZE;
+extern const char* SHOW_SPEAKER_NAMES;
 extern const char* CONFIG_JP_LOCALE;
 extern const wchar_t* ABOUT;
 extern const wchar_t* CL_OPTIONS;
@@ -83,6 +85,8 @@ namespace
 	std::unordered_set<DWORD> alreadyAttached;
 	bool autoAttach = false, autoAttachSavedOnly = true;
 	bool showSystemProcesses = false;
+	bool showSpeakerNames = false;
+	std::unordered_map<int64_t, ThreadRole> threadRoles;
 	uint64_t savedThreadCtx = 0, savedThreadCtx2 = 0;
 	wchar_t savedThreadCode[1000] = {};
 	TextThread* current = nullptr;
@@ -128,6 +132,7 @@ namespace
 		{ "hook address", (int64_t)thread.tp.addr },
 		{ "text handle", thread.handle },
 		{ "text name", (int64_t)thread.name.c_str() },
+		{ "thread role", threadRoles.count(thread.handle) ? threadRoles.at(thread.handle) : THREAD_ROLE_AUTOMATIC },
 		{ "add sentence", (int64_t)AddSentence },
 		{ "add text", (int64_t)AddText },
 		{ "get selected process id", (int64_t)GetSelectedProcessId },
@@ -495,6 +500,7 @@ namespace
 			{ autoAttach, AUTO_ATTACH },
 			{ autoAttachSavedOnly, ATTACH_SAVED_ONLY },
 			{ showSystemProcesses, SHOW_SYSTEM_PROCESSES },
+			{ showSpeakerNames, SHOW_SPEAKER_NAMES },
 		})
 		{
 			auto checkBox = new QCheckBox(&dialog);
@@ -522,6 +528,16 @@ namespace
 		layout.addRow(CONFIG_JP_LOCALE, &localeCombo);
 		QObject::connect(&localeCombo, qOverload<int>(&QComboBox::activated), [&settings](int i) { settings.setValue(CONFIG_JP_LOCALE, i); });
 		layout.addWidget(&saveButton);
+		auto roleLabel = new QLabel(QString("Selected thread: %1").arg(current ? S(current->name) : "None"), &dialog);
+		layout.addRow("Thread role", roleLabel);
+		auto roleButtons = new QHBoxLayout();
+		for (auto [label, role] : { std::pair<const char*, ThreadRole>{ "Speaker", THREAD_ROLE_SPEAKER }, { "Dialogue", THREAD_ROLE_DIALOGUE }, { "Speaker + dialogue", THREAD_ROLE_SPEAKER_DIALOGUE }, { "Automatic", THREAD_ROLE_AUTOMATIC } })
+		{
+			auto button = new QPushButton(label, &dialog);
+			QObject::connect(button, &QPushButton::clicked, [role] { if (current) threadRoles[current->handle] = role; });
+			roleButtons->addWidget(button);
+		}
+		layout.addRow("Assign role", roleButtons);
 		QObject::connect(&saveButton, &QPushButton::clicked, &dialog, &QDialog::accept);
 		dialog.setWindowTitle(SETTINGS);
 		dialog.exec();
@@ -602,6 +618,7 @@ namespace
 	{
 		for (int i = 0; i < sentence.size(); ++i) if (sentence[i] == '\r' && sentence[i + 1] == '\n') sentence[i] = 0x200b; // for some reason \r appears as newline - no need to double
 		if (!DispatchSentenceToExtensions(sentence, GetSentenceInfo(thread).data())) return false;
+		if (showSpeakerNames) sentence = FormatSpeakerDisplay(std::move(sentence));
 		sentence += L'\n';
 		if (&thread == current) QMetaObject::invokeMethod(This, [sentence = S(sentence)]() mutable
 		{
@@ -666,6 +683,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
 	autoAttach = settings.value(AUTO_ATTACH, autoAttach).toBool();
 	autoAttachSavedOnly = settings.value(ATTACH_SAVED_ONLY, autoAttachSavedOnly).toBool();
 	showSystemProcesses = settings.value(SHOW_SYSTEM_PROCESSES, showSystemProcesses).toBool();
+	showSpeakerNames = settings.value(SHOW_SPEAKER_NAMES, showSpeakerNames).toBool();
 	TextThread::flushDelay = settings.value(FLUSH_DELAY, TextThread::flushDelay).toInt();
 	TextThread::maxBufferSize = settings.value(MAX_BUFFER_SIZE, TextThread::maxBufferSize).toInt();
 	TextThread::maxHistorySize = settings.value(MAX_HISTORY_SIZE, TextThread::maxHistorySize).toInt();
