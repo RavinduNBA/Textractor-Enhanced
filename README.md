@@ -1,88 +1,99 @@
-# Textractor
+# Textractor Enhanced
 
 ![How it looks](screenshot.png)
 
-[English](README.md) ● [Español](README_ES.md) ● [简体中文](README_SC.md) ● [Русский](README_RU.md) ● [한국어](README_KR.md) ● [ภาษาไทย](README_TH.md) ● [Français](README_FR.md) ● [Italiano](README_IT.md) ● [日本語](README_JP.md) ● [Bahasa Indonesia](README_ID.md) ● [Português](README_PT.md) ● [Deutsch](README_DE.md)
+[English](README.md) | [Español](README_ES.md) | [简体中文](README_SC.md) | [Русский](README_RU.md) | [한국어](README_KR.md) | [ภาษาไทย](README_TH.md) | [Français](README_FR.md) | [Italiano](README_IT.md) | [日本語](README_JP.md) | [Bahasa Indonesia](README_ID.md) | [Português](README_PT.md) | [Deutsch](README_DE.md)
 
-**Textractor Enhanced** (a.k.a. NextHooker) is an open-source x86/x64 video game text hooker for Windows 7+ (and Wine) based off of [ITHVNR](https://web.archive.org/web/20160202084144/http://www.hongfire.com/forum/showthread.php/438331-ITHVNR-ITH-with-the-VNR-engine). This fork adds browser-based Google Translate integration through a persistent Chrome/Edge DevTools session.<br>
-Watch the [tutorial video](docs/TUTORIAL.md) for a quick rundown on using it.
+Textractor Enhanced is an open-source x86/x64 video-game text hooker for Windows 7+ and Wine. It supports automatic hook discovery, AGTH-compatible hook codes, extensible text processing, and translation workflows for visual novels and other games.
 
-## Download
+See the [tutorial](docs/TUTORIAL.md) for a quick introduction.
 
-Textractor Enhanced releases are available [here](https://github.com/RavinduNBA/Textractor-Enhanced/releases). Separate x86 and x64 ZIP packages are provided.<br>
-Official stable releases of the original Textractor can be found [here](https://github.com/Artikash/Textractor/releases).<br>
-The last release of ITHVNR can be found [here](https://drive.google.com/open?id=13aHF4uIXWn-3YML_k2YCDWhtGgn5-tnO).<br>
-Experimental builds of Textractor (with debug info) from the latest source can be found [here](https://ci.appveyor.com/project/Artikash/textractor/history) in the 'Artifacts' section of each job.
+## Downloads
+
+Release packages are available on the [Textractor Enhanced releases page](https://github.com/RavinduNBA/Textractor-Enhanced/releases).
+
+Separate x86 and x64 ZIP packages are provided. Choose the package matching the architecture of the target game.
 
 ## Features
 
-- Highly extensible and customizable
-- Auto hook many game engines (including some not supported by VNR!)
-- Hook text using /H "hook" codes (most AGTH codes supported)
-- Automatically search for possible hook codes
-- Browser-based Google Translate using the full Google Translate website
-- Google Translate Advanced mode support through a persistent Chrome/Edge session
-- Manual Google CAPTCHA solving in the controlled browser session, without opening a new tab for every line
-- Translate selected threads only by default
+- Extensible and customizable text processing
+- Automatic hook support for many game engines
+- `/H` hook codes with support for most AGTH-style codes
+- Automatic search for possible hook codes
+- Browser-based Google Translate through a persistent Chrome or Edge DevTools session
+- Google Translate website Advanced mode support
+- Manual CAPTCHA solving in the controlled browser session
+- Hidden browser mode with an option to show the browser window
+- Translation of selected threads only
+- Manual speaker, dialogue, and speaker-plus-dialogue thread roles
+- Persistent speaker-name mappings such as `未来=Mirai`
 
-## Support
+## Google Translate
 
-Let me know of any bugs, games that Textractor has trouble hooking, feature requests, or other suggestions by posting an issue.<br>
-If you have trouble hooking a game, please show me a way to freely download it or gift it to me on [Steam](https://steamcommunity.com/profiles/76561198097566313/).
+The Google Translate extension uses the Chrome DevTools Protocol instead of a separate HTTP session. This allows CAPTCHA cookies and website state to remain in the same controlled browser session.
 
-## Extensions
+The browser can run hidden by default. Open the DevTools settings to toggle **Hide Chrome** and control browser visibility. If Google presents a CAPTCHA, solve it in the controlled browser session. Later requests reuse the same session instead of opening a new browser tab for every line.
 
-See my [Example Extension project](https://github.com/Artikash/ExampleExtension) to see how to build an extension.<br>
-See the extensions folder for examples of what extensions can do. 
+An API key is optional when using the browser-based workflow.
 
-### Browser-Based Google Translate
+## Dialogue Roles and Speaker Names
 
-The enhanced Google Translate extension uses a browser session controlled through the Chrome DevTools Protocol. This allows Google Translate's website features, including Advanced mode, to be used without an API key. If Google presents a CAPTCHA, solve it in the controlled browser session; later translation requests reuse that session instead of opening a new browser tab.
+Select a text thread, open **Settings**, and assign one of these roles:
 
-The browser can run hidden by default. Use the DevTools settings to toggle **Hide Chrome** and control whether the browser window is visible. The extension defaults to translating the selected thread only.
+- **Speaker**: the thread contains only a character name
+- **Dialogue**: the thread contains only dialogue
+- **Speaker + dialogue**: the thread contains text such as `未来「のーぞーむーちゃんっ」`
+- **Automatic**: use normal translation behavior
 
-### Dialogue Thread Roles and Speaker Names
-
-Google Translate can assign different roles to text threads from **Settings** while a thread is selected:
-
-- **Speaker** for a thread that contains only a character name
-- **Dialogue** for a thread that contains only dialogue
-- **Speaker + dialogue** for text such as `未来「のーぞーむーちゃんっ」`
-- **Automatic** to use the normal translation behavior
-
-For speaker threads, add name mappings in the Google Translate extension settings under **Speaker names**, one per line:
+For speaker threads, open the Google Translate extension settings and add mappings under **Speaker names**, one per line:
 
 ```text
 未来=Mirai
 京香=Kyoka
 ```
 
-Mapped names are used directly instead of being sent to Google Translate, preventing names such as `未来` from being translated as the common word `future`. Speaker + dialogue threads are split into separate speaker and dialogue queries, then displayed as:
+Mapped names are used directly instead of being sent to Google Translate. This prevents a character named `未来` from being translated as the common word `future`.
+
+Speaker-plus-dialogue threads are split into separate speaker and dialogue queries. The output can then be displayed as:
 
 ```text
 Mirai:
 Nozomu-chan!
 ```
 
-## Contributing
+## Extensions
 
-All contributions are appreciated! Please email me at akashmozumdar@gmail.com if you have any questions about the codebase.<br>
-You should use the standard process of making a pull request (fork, branch, commit changes, make PR from your branch to my master).<br>
-Contributing a translation is easy: [text.cpp](text.cpp) contains all of the text strings that you need to translate. Translations of this README or the tutorial video transcript are also welcome.
+The `extensions` directory contains built-in extensions and examples of text filters, translators, window tools, and processing utilities.
 
-## Compiling
-Before compiling Textractor, you need Qt version 5.13 and Visual Studio with CMake support.
-Clone Textractor's source and initialize submodules with `git clone https://github.com/Artikash/Textractor.git` and `git submodule update --init`.
-You should then be able to just open the source folder in Visual Studio and build.
+## Building
 
-For this fork, install both Qt 5.13 MSVC kits: **MSVC 2017 32-bit** for x86 builds and **MSVC 2017 64-bit** for x64 builds. Build the `x86-RelWithDebInfo` or `x64-RelWithDebInfo` configuration for release packages.
+Requirements:
+
+- Qt 5.13
+- Visual Studio with CMake support
+- Qt 5.13 MSVC 2017 32-bit kit for x86 builds
+- Qt 5.13 MSVC 2017 64-bit kit for x64 builds
+
+Clone the repository and initialize its submodules:
+
+```powershell
+git clone https://github.com/RavinduNBA/Textractor-Enhanced.git
+cd Textractor-Enhanced
+git submodule update --init
+```
+
+Open the source folder in Visual Studio and select the appropriate x86 or x64 CMake configuration. Use `RelWithDebInfo` for release builds.
+
+## Support
+
+Report bugs, hook compatibility issues, and feature requests through the [GitHub issue tracker](https://github.com/RavinduNBA/Textractor-Enhanced/issues). Include the game architecture, Textractor architecture, relevant hook details, and reproducible steps when possible.
 
 ## Project Architecture
 
-The host injects texthook into the target process and connects to it via 2 pipe files.
-texthook waits for the pipe to be connected, then injects a few instructions into any text outputting functions (e.g. TextOut, GetGlyphOutline) that cause their input to be sent through the pipe.<br>
-Additional information about hooks is exchanged via shared memory.<br>
-The text that the host receives through the pipe is then processed a little before being dispatched back to the GUI.<br>
-Finally, the GUI dispatches the text to extensions before displaying it.
+The host injects `texthook` into the target process and communicates with it through named pipes. `texthook` injects instructions into text-producing functions and sends captured text back to the host. Additional hook information is exchanged through shared memory.
 
-## [Developers](docs/CREDITS.md)
+The host processes captured text and dispatches completed sentences to the GUI and loaded extensions. Extensions can filter, transform, translate, or display the text before it is appended to the selected thread output.
+
+## Credits
+
+See [docs/CREDITS.md](docs/CREDITS.md) for project and dependency credits.
